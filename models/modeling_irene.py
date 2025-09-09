@@ -53,6 +53,10 @@ class Transformer(nn.Module):
         vis: 是否启用可视化（返回注意力权重）
         """
         super(Transformer, self).__init__()
+        self.config = config
+        self.use_image = config.modality.use_image
+        self.use_text = config.modality.use_text
+
         # 多模态嵌入层：将图像patches和临床数据转换为统一的嵌入表示
         self.embeddings = Embeddings(config, img_size=img_size)
         # Transformer编码器：处理序列化的多模态数据
@@ -79,14 +83,26 @@ class Transformer(nn.Module):
         3. 通过编码器进行多模态特征融合
         """
         # Step 1: 多模态嵌入
-        embedding_output, cc, lab, sex, age = self.embeddings(input_ids, cc, lab, sex, age)
-        
-        # Step 2: 拼接临床文本信息
-        # 将临床描述、实验室结果、性别、年龄按序列维度拼接
-        text = torch.cat((cc, lab, sex, age), 1)
+        # embedding_output, cc, lab, sex, age = self.embeddings(input_ids, cc, lab, sex, age)
+        image_embeddings, text_embeddings = self.embeddings(input_ids, cc, lab, sex, age)
+
+        if self.use_image and self.use_text:
+            # 多模态
+            primary_embeddings = image_embeddings
+            auxiliary_embeddings = text_embeddings
+        elif self.use_image:
+            # 纯图像
+            primary_embeddings = image_embeddings
+            auxiliary_embeddings = None
+        elif self.use_text:
+            # 纯文本
+            primary_embeddings = text_embeddings
+            auxiliary_embeddings = None
+        else:
+            raise ValueError("At least one modality (image or text) must be enabled")
         
         # Step 3: Transformer编码
-        encoded, attn_weights = self.encoder(embedding_output, text)
+        encoded, attn_weights = self.encoder(primary_embeddings, auxiliary_embeddings)
         return encoded, attn_weights
 
 
@@ -107,6 +123,10 @@ class IRENE(nn.Module):
         self.num_classes = num_classes
         self.zero_head = zero_head
         self.classifier = config.classifier  # 分类器类型（通常为'token'）
+
+        self.config = config
+        self.use_image = config.modality.use_image
+        self.use_text = config.modality.use_text
 
         # 核心Transformer模块
         self.transformer = Transformer(config, img_size, vis)
@@ -137,8 +157,13 @@ class IRENE(nn.Module):
         3. 通过分类头预测疾病概率
         4. 计算损失（训练时）或返回预测结果（推理时）
         """
+        if self.use_image and x is None:
+            raise ValueError("Image input required when use_image=True")
+        if self.use_text and (cc is None or lab is None or sex is None or age is None):
+            raise ValueError("Text inputs (cc, lab, sex, age) required when use_text=True")
+
         # Step 1: Transformer多模态编码
-        x, attn_weights = self.transformer(x, cc, lab, sex, age)
+        features, attn_weights = self.transformer(input_ids=x, cc=cc, lab=lab, sex=sex, age=age)
         
         # Step 2: 全局平均池化
         # 将序列表示 [batch, seq_len, hidden_dim] 池化为 [batch, hidden_dim]
@@ -184,63 +209,46 @@ class IRENE(nn.Module):
                 self.head.weight.copy_(np2th(weights["head/kernel"]).t())
                 self.head.bias.copy_(np2th(weights["head/bias"]).t())
 
-            # 加载嵌入层权重
-            # patch_embeddings: 将图像patches转换为嵌入向量的卷积层
-            self.transformer.embeddings.patch_embeddings.weight.copy_(np2th(weights["embedding/kernel"], conv=True))
-            self.transformer.embeddings.patch_embeddings.bias.copy_(np2th(weights["embedding/bias"]))
-            
-            # cls_token: 分类token，用于聚合序列信息
-            self.transformer.embeddings.cls_token.copy_(np2th(weights["cls"]))
-            
-            # 编码器层归一化权重
+            if self.use_image:
+                self.transformer.embeddings.patch_embeddings.weight.copy_(np2th(weights["embedding/kernel"], conv=True))
+                self.transformer.embeddings.patch_embeddings.bias.copy_(np2th(weights["embedding/bias"]))
+                self.transformer.embeddings.cls_token.copy_(np2th(weights["cls"]))
+
+                posemb = np2th(weights["Transformer/posembed_input/pos_embedding"])
+                posemb_new = self.transformer.embeddings.position_embeddings
+                if posemb.size() == posemb_new.size():
+                    self.transformer.embeddings.position_embeddings.copy_(posemb)
+                else:
+                    logger.info("load_pretrained: resized variant: %s to %s" % (posemb.size(), posemb_new.size()))
+                    ntok_new = posemb_new.size(1)
+
+                    if self.classifier == "token":
+                        posemb_tok, posemb_grid = posemb[:, :1], posemb[0, 1:]
+                        ntok_new -= 1
+                    else:
+                        posemb_tok, posemb_grid = posemb[:, :0], posemb[0]
+
+                    gs_old = int(np.sqrt(len(posemb_grid)))
+                    gs_new = int(np.sqrt(ntok_new))
+                    print('load_pretrained: grid-size from %s to %s' % (gs_old, gs_new))
+                    posemb_grid = posemb_grid.reshape(gs_old, gs_old, -1)
+
+                    zoom = (gs_new / gs_old, gs_new / gs_old, 1)
+                    posemb_grid = ndimage.zoom(posemb_grid, zoom, order=1)
+                    posemb_grid = posemb_grid.reshape(1, gs_new * gs_new, -1)
+                    posemb = np.concatenate([posemb_tok, posemb_grid], axis=1)
+                    self.transformer.embeddings.position_embeddings.copy_(np2th(posemb))
+
             self.transformer.encoder.encoder_norm.weight.copy_(np2th(weights["Transformer/encoder_norm/scale"]))
             self.transformer.encoder.encoder_norm.bias.copy_(np2th(weights["Transformer/encoder_norm/bias"]))
 
-            # 处理位置编码权重
-            # 位置编码用于为序列中的每个位置提供位置信息
-            posemb = np2th(weights["Transformer/posembed_input/pos_embedding"])
-            posemb_new = self.transformer.embeddings.position_embeddings
-            # print(posemb.size(), posemb_new.size())
-            if posemb.size() == posemb_new.size():
-                # 尺寸匹配，直接复制
-                self.transformer.embeddings.position_embeddings.copy_(posemb)
-            else:
-                # 尺寸不匹配，需要插值调整
-                logger.info("load_pretrained: resized variant: %s to %s" % (posemb.size(), posemb_new.size()))
-                ntok_new = posemb_new.size(1)
-
-                if self.classifier == "token":
-                    # 分离CLS token和网格位置编码
-                    posemb_tok, posemb_grid = posemb[:, :1], posemb[0, 1:]
-                    ntok_new -= 1
-                else:
-                    posemb_tok, posemb_grid = posemb[:, :0], posemb[0]
-
-                # 计算网格尺寸并进行插值
-                gs_old = int(np.sqrt(len(posemb_grid)))  # 原始网格尺寸
-                gs_new = int(np.sqrt(ntok_new))          # 新的网格尺寸
-                print('load_pretrained: grid-size from %s to %s' % (gs_old, gs_new))
-                
-                # 重塑为2D网格进行插值
-                posemb_grid = posemb_grid.reshape(gs_old, gs_old, -1)
-
-                # 使用双线性插值调整尺寸
-                zoom = (gs_new / gs_old, gs_new / gs_old, 1)
-                posemb_grid = ndimage.zoom(posemb_grid, zoom, order=1)
-                posemb_grid = posemb_grid.reshape(1, gs_new * gs_new, -1)
-                
-                # 重新拼接CLS token和网格位置编码
-                posemb = np.concatenate([posemb_tok, posemb_grid], axis=1)
-                self.transformer.embeddings.position_embeddings.copy_(np2th(posemb))
-
-            # 加载Transformer编码器各层的权重
             for bname, block in self.transformer.encoder.named_children():
                 for uname, unit in block.named_children():
                     unit.load_from(weights, n_block=uname)
 
-            # 如果使用混合架构（卷积+Transformer），加载卷积部分权重
-            if self.transformer.embeddings.hybrid:
-                self.transformer.embeddings.hybrid_model.root.conv.weight.copy_(np2th(weights["conv_root/kernel"], conv=True))
+            if hasattr(self.transformer.embeddings, 'hybrid') and self.transformer.embeddings.hybrid:
+                self.transformer.embeddings.hybrid_model.root.conv.weight.copy_(
+                    np2th(weights["conv_root/kernel"], conv=True))
                 gn_weight = np2th(weights["gn_root/scale"]).view(-1)
                 gn_bias = np2th(weights["gn_root/bias"]).view(-1)
                 self.transformer.embeddings.hybrid_model.root.gn.weight.copy_(gn_weight)
@@ -249,7 +257,6 @@ class IRENE(nn.Module):
                 for bname, block in self.transformer.embeddings.hybrid_model.body.named_children():
                     for uname, unit in block.named_children():
                         unit.load_from(weights, n_block=bname, n_unit=uname)
-
 
 CONFIGS = {
     'IRENE': configs.get_IRENE_config(),

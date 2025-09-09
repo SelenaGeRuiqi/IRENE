@@ -61,6 +61,10 @@ class Encoder(nn.Module):
         # 确保nn.Module中的参数和缓冲区被正确初始化
         super(Encoder, self).__init__()
         self.vis = vis
+
+        self.modality_config = config.modality
+        self.use_image = self.modality_config.use_image
+        self.use_text = self.modality_config.use_text
         
         # 存储所有Transformer层的列表
         self.layer = nn.ModuleList()
@@ -71,8 +75,8 @@ class Encoder(nn.Module):
         
         # 构建分层的Transformer架构
         for i in range(config.transformer["num_layers"]):
-            if i < 2:
-                # 前两层：多模态分离处理
+            if i < 2 and self.use_image and self.use_text:
+                # 只有在多模态模式下，前2层才使用多模态注意力
                 # mm=True 表示这是多模态Block，会分别处理图像和文本
                 layer = Block(config, vis, mm=True)
             else:
@@ -112,28 +116,34 @@ class Encoder(nn.Module):
            - 学习跨模态的高级语义关联
         """
         attn_weights = []  # 存储每层的注意力权重
+
+        is_multimodal = (text is not None and self.use_image and self.use_text)
+        is_text_only = (not self.use_image and self.use_text)
+        is_image_only = (self.use_image and not self.use_text)
         
         # 逐层处理
         for (i, layer_block) in enumerate(self.layer):
-            if i == 2:
-                # 第3层（索引2）：执行模态融合
-                # 将图像特征和文本特征在序列维度上拼接
-                # hidden_states: [batch, img_seq_len, hidden_dim] 
-                # text: [batch, text_seq_len, hidden_dim]
-                # 拼接后: [batch, img_seq_len + text_seq_len, hidden_dim]
-                hidden_states = torch.cat((hidden_states, text), 1)  
-                
-                # 从此层开始，只有一个输出（融合后的特征）
-                hidden_states, weights = layer_block(hidden_states)
-                
-            elif i < 2:
-                # 前两层：多模态分离处理
-                # 返回三个值：处理后的图像特征、处理后的文本特征、注意力权重
-                hidden_states, text, weights = layer_block(hidden_states, text)
-                
+            if is_multimodal:
+                if i == 2:
+                    # 第3层（索引2）：执行模态融合
+                    # 将图像特征和文本特征在序列维度上拼接
+                    # hidden_states: [batch, img_seq_len, hidden_dim]
+                    # text: [batch, text_seq_len, hidden_dim]
+                    # 拼接后: [batch, img_seq_len + text_seq_len, hidden_dim]
+                    hidden_states = torch.cat((hidden_states, text), 1)
+
+                    # 从此层开始，只有一个输出（融合后的特征）
+                    hidden_states, weights = layer_block(hidden_states)
+
+                elif i < 2:
+                    # 前两层：多模态分离处理, 返回三个值：处理后的图像特征、处理后的文本特征、注意力权重
+                    hidden_states, text, weights = layer_block(hidden_states, text)
+
+                else:
+                    # 第3层之后：标准Transformer处理, 输入和输出都是融合后的特征序列
+                    hidden_states, weights = layer_block(hidden_states)
             else:
-                # 第3层之后：标准Transformer处理
-                # 输入和输出都是融合后的特征序列
+                # 【新增】单模态模式（图像或文本）
                 hidden_states, weights = layer_block(hidden_states)
 
             # 如果启用可视化，收集注意力权重
@@ -141,9 +151,7 @@ class Encoder(nn.Module):
                 attn_weights.append(weights)
         
         # 最终层归一化
-        # 对所有特征进行标准化，确保输出的数值稳定性
         encoded = self.encoder_norm(hidden_states)
-        
         return encoded, attn_weights
 
 

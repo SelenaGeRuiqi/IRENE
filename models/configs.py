@@ -29,4 +29,9 @@ def get_IRENE_config():
     config.representation_size = None
     config.cc_len = 40
     config.lab_len = 92
+
+    config.modality = ml_collections.ConfigDict()
+    config.modality.use_image = True
+    config.modality.use_text = False
+    config.modality.mode = 'image'  # 'image', 'text', 'multimodal'
     return config
