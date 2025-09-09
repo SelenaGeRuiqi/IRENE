@@ -31,3 +31,56 @@ else: 标准模式, 传统的自注意力计算
     2） text is None: layer3以后，图像和文本token已被拼接成一个序列，只有一个hidden_states输入
         标准self attn
 
+
+
+图像only，文本only，图像+文本
+
+1. config.py
+config.modality.use_image = True/False
+config.modality.use_text = True/False
+config.modality.mode = 'image'/'text'/'multimodal'
+
+2. embedding [→](embed.py)
+if self.use_image:
+    self.patch_embeddings = Conv2d(...)  # 图像patch嵌入
+    self.position_embeddings = nn.Parameter(...)  # 图像位置编码
+    self.cls_token = nn.Parameter(...)  # 图像CLS token
+ 
+if self.use_text:
+    self.cc_embeddings = Linear(...)
+    self.lab_embeddings = Linear(...)
+    self.sex_embeddings = Linear(...)
+    self.age_embeddings = Linear(...)
+
+3. encoder [→](encoder.py)
+在Encoder.__init__()中
+for i in range(config.transformer["num_layers"]):
+    只有多模态模式前2层才用多模态注意力
+    if i < 2 and self.use_image and self.use_text:
+        layer = Block(config, vis, mm=True)  # 多模态Block
+    else:
+        layer = Block(config, vis, mm=False)  # 标准Block
+
+在Transformer.forward()中
+if self.use_image and self.use_text:
+    # 多模态
+    primary_embeddings = image_embeddings
+    auxiliary_embeddings = text_embeddings
+elif self.use_image:
+    # 纯图像
+    primary_embeddings = image_embeddings
+    auxiliary_embeddings = None
+elif self.use_text:
+    # 纯文本
+    primary_embeddings = text_embeddings
+    auxiliary_embeddings = None
+
+### 这些参数在三种模态下都是相同的
+self.transformer.encoder.encoder_norm  # ✅ 共享
+self.head  # ✅ 共享
+self.transformer.encoder.layer[3-11]  # ✅ 共享
+
+### 这些参数是模态特定的
+self.transformer.embeddings.patch_embeddings  # 🔸 仅图像模态
+self.transformer.embeddings.cc_embeddings     # 🔸 仅文本模态
+self.transformer.encoder.layer[0-1]  # 🔸 多模态注意力
