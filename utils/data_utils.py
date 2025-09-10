@@ -8,7 +8,7 @@ import pickle
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
-
+from IRENE.irene import FlexibleData
 
 def load_disease_info(data_dir):
     disease_info_path = os.path.join(data_dir, 'disease_info.pkl')
@@ -57,8 +57,6 @@ def setup_data_transforms(mode):
 
 
 def create_dataloaders(config):
-    from irene import FlexibleData
-    
     data_transforms = setup_data_transforms(config.modality.mode)
     
     img_dir = os.path.join(config.paths.data_dir, 'images')
