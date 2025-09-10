@@ -217,8 +217,7 @@ def test(args):
     # irene, optimizer_irene = amp.initialize(irene.cuda(), optimizer_irene, opt_level="O1")
     # 移除apex 相关代码，使用标准 PyTorch
     irene = irene.cuda ()
-    optimizer_ irene = torch.optim.AdamW(irene.parameters(), 1r=3e-5, weight_decay=0.01)
-
+    optimizer_ irene = torch.optim.AdamW(irene.parameters(), lr=3e-5, weight_decay=0.01)
     irene = torch.nn.DataParallel(irene)
 
     #----- 开始测试 ------
