@@ -230,7 +230,7 @@ def test(args):
             imgs, labels, cc, demo, lab = data
             labels = labels.cuda(non_blocking=True)
 
-            # 【修改】根据模态模式处理输入
+            # 根据模态模式处理输入
             if mode == 'image':
                 # 纯图像模式
                 imgs = imgs.cuda(non_blocking=True)
@@ -278,7 +278,7 @@ if __name__ == '__main__':
                         help='数据目录')
     parser.add_argument('--SET_TYPE', action='store', dest='SET_TYPE', required=True, type=str,
                         help='数据集类型')
-    # 【新增】模态模式参数
+    # 模态模式参数
     parser.add_argument('--MODE', action='store', dest='MODE', required=True, type=str,
                         choices=['image', 'text', 'multimodal'],
                         help='模态模式: image(纯图像), text(纯文本), multimodal(多模态)')
