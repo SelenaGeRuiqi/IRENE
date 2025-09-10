@@ -1,8 +1,13 @@
 """
-处理肺部三个方向的AIP投影图像
+处理肺部三个方向的AIP投影图像(暂时只用了axial path，没有做融合)
 axial_path:轴状面投影图像路径，指向轴状面的平均强度投影图像(.png格式)
 coronal_path:冠状面投影图像路径，指向冠状面的平均强度投影图像(.png格式)
 sagittal_path:矢状面投影图像路径，指向矢状面的平均强度投影图像(.png格式)
+
+Creates train.pkl / test.pkl with exactly the required dict schema in readme file
+Files are saved under processed_data/ (not ./data/)
+processed_data/images/ for PNGs
+processed_data/disease_info.pkl for label meta.
 """
 
 import os

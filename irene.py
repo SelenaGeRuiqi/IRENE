@@ -27,9 +27,14 @@ if not sys.warnoptions:
 # 这是为了保证所有样本的文本输入长度一致，便于批处理
 tk_lim = 40
 
-# 定义8种肺部疾病类别
-# IRENE模型可以同时预测多种疾病的存在概率（多标签分类）
-disease_list = ['COPD', 'Bronchiectasis', 'Pneumothorax', 'Pneumonia', 'ILD', 'Tuberculosis', 'Lung cancer', 'Pleural effusion']
+def load_disease_info_from_processed(data_dir='./processed_data'):
+    info_path = os.path.join(data_dir, 'disease_info.pkl')
+    with open(info_path, 'rb') as f:
+        return pickle.load(f)
+
+disease_info = load_disease_info_from_processed('./processed_data')
+disease_list = disease_info['disease_list']
+num_classes = disease_info['num_classes']
 
 def load_weights(model, weight_path):
     pretrained_weights = torch.load(weight_path, map_location=torch.device('cpu'))

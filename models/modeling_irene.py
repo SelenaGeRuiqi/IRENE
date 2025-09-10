@@ -168,7 +168,7 @@ class IRENE(nn.Module):
         # Step 2: 全局平均池化
         # 将序列表示 [batch, seq_len, hidden_dim] 池化为 [batch, hidden_dim]
         # 这里使用平均池化来聚合所有token的信息
-        pooled_features = torch.mean(x, dim=1)
+        pooled_features = torch.mean(features, dim=1)
         
         # Step 3: 分类预测
         logits = self.head(pooled_features)
