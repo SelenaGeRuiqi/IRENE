@@ -35,3 +35,7 @@ def get_IRENE_config():
     config.modality.use_text = False
     config.modality.mode = 'image'  # 'image', 'text', 'multimodal'
     return config
+
+
+## 数据预处理模块
+## 先训练特征

@@ -13,8 +13,9 @@ import pickle
 import pandas as pd
 from PIL import Image
 import argparse
-from apex import amp  # NVIDIA的混合精度训练库，可以加速训练并减少显存使用
-from sklearn.metrics.ranking import roc_auc_score  # ROC-AUC评估指标，医疗诊断中的重要性能指标
+# from apex import amp  # NVIDIA的混合精度训练库，可以加速训练并减少显存使用
+# from sklearn.metrics.ranking import roc_auc_score  # ROC-AUC评估指标，医疗诊断中的重要性能指标
+from sklearn.metrics import roc_auc_score
 from models.modeling_irene import IRENE, CONFIGS  # 导入IRENE模型架构和配置
 from tqdm import tqdm  # 进度条显示库
 import argparse
@@ -207,8 +208,12 @@ def test(args):
     test_data = FlexibleData(args.SET_TYPE, img_dir, mode=mode, transform=transform)
     testloader = DataLoader(test_data, batch_size=args.BSZ, shuffle=False, num_workers=16, pin_memory=True)
 
-    optimizer_irene = torch.optim.AdamW(irene.parameters(), lr=3e-5, weight_decay=0.01)
-    irene, optimizer_irene = amp.initialize(irene.cuda(), optimizer_irene, opt_level="O1")
+    # optimizer_irene = torch.optim.AdamW(irene.parameters(), lr=3e-5, weight_decay=0.01)
+    # irene, optimizer_irene = amp.initialize(irene.cuda(), optimizer_irene, opt_level="O1")
+    # 移除apex 相关代码，使用标准 PyTorch
+    irene = irene.cuda ()
+    optimizer_ irene = torch.optim.AdamW(irene.parameters(), 1r=3e-5, weight_decay=0.01)
+
     irene = torch.nn.DataParallel(irene)
 
     #----- 开始测试 ------
